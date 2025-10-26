@@ -1,4 +1,7 @@
 # C++ compilation artifacts
+build/
+_deps/
+lib/
 bin/
 obj/
 out/
@@ -8,6 +11,8 @@ out/
 *.exe
 *.dll
 *.dylib
+Makefile
+CMakeFiles/
 
 # CMake build artifacts (精確控制 - 只忽略構建產物，保留目錄結構)
 build/bin/

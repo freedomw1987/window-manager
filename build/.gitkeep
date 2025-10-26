@@ -1,9 +1,0 @@
-# This file ensures the build directory is tracked by Git
-#
-# The build directory is needed for CMake builds, but we ignore all build artifacts
-# except this file to keep the repository clean while maintaining the directory structure.
-#
-# Build instructions:
-# 1. mkdir -p build && cd build
-# 2. cmake ..
-# 3. make
