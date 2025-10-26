@@ -1,0 +1,297 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Window Manager CLI Interface Contract",
+    "description": "Command-line interface specification for the Window List and Filter Program",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/cli/list": {
+      "description": "Basic window listing command",
+      "parameters": {
+        "format": {
+          "type": "string",
+          "enum": ["text", "json"],
+          "default": "text",
+          "description": "Output format"
+        },
+        "verbose": {
+          "type": "boolean",
+          "default": false,
+          "description": "Include detailed window information"
+        }
+      },
+      "responses": {
+        "success": {
+          "description": "List of all windows",
+          "examples": {
+            "text": "Windows (15 total):\n[1] Chrome - Google Search\n    Position: (100, 200)  Size: 1024x768  PID: 1234\n...",
+            "json": {
+              "windows": [
+                {
+                  "handle": "win-001",
+                  "title": "Google Search",
+                  "position": {"x": 100, "y": 200},
+                  "size": {"width": 1024, "height": 768},
+                  "visible": true,
+                  "processId": 1234,
+                  "owner": "Chrome"
+                }
+              ],
+              "totalCount": 15,
+              "timestamp": "2025-10-26T10:30:00Z"
+            }
+          }
+        },
+        "error": {
+          "description": "Error message",
+          "example": "Error: Unable to enumerate windows - permission denied"
+        }
+      }
+    },
+    "/cli/search": {
+      "description": "Keyword-based window filtering",
+      "parameters": {
+        "keyword": {
+          "type": "string",
+          "required": true,
+          "description": "Search term to filter windows"
+        },
+        "case-sensitive": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable case-sensitive matching"
+        },
+        "match-mode": {
+          "type": "string",
+          "enum": ["contains", "starts-with", "exact"],
+          "default": "contains",
+          "description": "Matching algorithm"
+        },
+        "format": {
+          "type": "string",
+          "enum": ["text", "json"],
+          "default": "text"
+        }
+      },
+      "responses": {
+        "success": {
+          "description": "Filtered window results",
+          "examples": {
+            "text": "Search results for 'chrome' (3 of 15):\n[1] Chrome - Google Search\n    Position: (100, 200)  Size: 1024x768  PID: 1234\n\nSearch completed in 45ms",
+            "json": {
+              "windows": [
+                {
+                  "handle": "win-001",
+                  "title": "Google Search",
+                  "position": {"x": 100, "y": 200},
+                  "size": {"width": 1024, "height": 768},
+                  "visible": true,
+                  "processId": 1234,
+                  "owner": "Chrome"
+                }
+              ],
+              "metadata": {
+                "totalCount": 15,
+                "filteredCount": 3,
+                "searchTime": 45,
+                "query": "chrome",
+                "timestamp": "2025-10-26T10:30:00Z"
+              }
+            }
+          }
+        },
+        "no_matches": {
+          "description": "No windows found matching criteria",
+          "examples": {
+            "text": "No windows found matching 'nonexistent'\nSearch completed in 12ms",
+            "json": {
+              "windows": [],
+              "metadata": {
+                "totalCount": 15,
+                "filteredCount": 0,
+                "searchTime": 12,
+                "query": "nonexistent",
+                "timestamp": "2025-10-26T10:30:00Z"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/cli/interactive": {
+      "description": "Interactive filtering mode",
+      "flow": {
+        "1": {
+          "action": "display_initial_list",
+          "description": "Show all windows initially"
+        },
+        "2": {
+          "action": "prompt_for_input",
+          "description": "Display search prompt: 'Search (or 'q' to quit): '"
+        },
+        "3": {
+          "action": "process_input",
+          "options": {
+            "empty": "Show all windows",
+            "quit_commands": ["q", "quit", "exit"],
+            "search_term": "Filter and display results"
+          }
+        },
+        "4": {
+          "action": "update_display",
+          "description": "Real-time update of filtered results"
+        },
+        "5": {
+          "action": "loop",
+          "description": "Return to step 2 until quit command"
+        }
+      },
+      "performance_requirements": {
+        "initial_load": "< 3 seconds",
+        "search_response": "< 1 second",
+        "display_update": "< 100 milliseconds"
+      }
+    }
+  },
+  "commands": {
+    "window-manager": {
+      "description": "Main executable command",
+      "usage": "window-manager [options] [command] [args...]",
+      "options": {
+        "--help, -h": "Show help message",
+        "--version, -v": "Show version information",
+        "--format, -f": "Output format (text|json)",
+        "--verbose": "Enable verbose output",
+        "--case-sensitive, -c": "Enable case-sensitive search",
+        "--timeout, -t": "Set operation timeout in seconds"
+      },
+      "commands": {
+        "list": {
+          "description": "List all windows",
+          "usage": "window-manager list [--format text|json] [--verbose]",
+          "examples": [
+            "window-manager list",
+            "window-manager list --format json",
+            "window-manager list --verbose"
+          ]
+        },
+        "search": {
+          "description": "Search windows by keyword",
+          "usage": "window-manager search <keyword> [options]",
+          "examples": [
+            "window-manager search chrome",
+            "window-manager search 'Google Chrome' --case-sensitive",
+            "window-manager search editor --format json"
+          ]
+        },
+        "interactive": {
+          "description": "Start interactive filtering mode",
+          "usage": "window-manager interactive [--format text|json]",
+          "examples": [
+            "window-manager interactive",
+            "window-manager interactive --format json"
+          ]
+        }
+      }
+    }
+  },
+  "data_models": {
+    "window_info": {
+      "type": "object",
+      "properties": {
+        "handle": {"type": "string", "description": "Platform-specific window identifier"},
+        "title": {"type": "string", "description": "Window title/caption"},
+        "position": {
+          "type": "object",
+          "properties": {
+            "x": {"type": "integer", "description": "X coordinate"},
+            "y": {"type": "integer", "description": "Y coordinate"}
+          }
+        },
+        "size": {
+          "type": "object",
+          "properties": {
+            "width": {"type": "integer", "minimum": 1},
+            "height": {"type": "integer", "minimum": 1}
+          }
+        },
+        "visible": {"type": "boolean", "description": "Window visibility state"},
+        "processId": {"type": "integer", "minimum": 1},
+        "owner": {"type": "string", "description": "Application name"}
+      },
+      "required": ["handle", "title", "position", "size", "visible", "processId", "owner"]
+    },
+    "search_query": {
+      "type": "object",
+      "properties": {
+        "keyword": {"type": "string"},
+        "caseSensitive": {"type": "boolean", "default": false},
+        "matchMode": {
+          "type": "string",
+          "enum": ["contains", "starts-with", "exact"],
+          "default": "contains"
+        }
+      },
+      "required": ["keyword"]
+    },
+    "filter_result": {
+      "type": "object",
+      "properties": {
+        "windows": {
+          "type": "array",
+          "items": {"$ref": "#/data_models/window_info"}
+        },
+        "metadata": {
+          "type": "object",
+          "properties": {
+            "totalCount": {"type": "integer", "minimum": 0},
+            "filteredCount": {"type": "integer", "minimum": 0},
+            "searchTime": {"type": "integer", "description": "Milliseconds"},
+            "query": {"type": "string"},
+            "timestamp": {"type": "string", "format": "date-time"}
+          }
+        }
+      }
+    }
+  },
+  "error_handling": {
+    "platform_errors": {
+      "windows": {
+        "permission_denied": "Error: Unable to access window information - check user permissions",
+        "api_failure": "Error: Windows API call failed - {specific_error}"
+      },
+      "linux": {
+        "display_not_found": "Error: Cannot connect to X11 display - check DISPLAY environment variable",
+        "x11_error": "Error: X11 operation failed - {specific_error}"
+      },
+      "macos": {
+        "accessibility_denied": "Error: Accessibility permission required. Enable in System Preferences > Security & Privacy > Privacy > Accessibility",
+        "api_failure": "Error: macOS API call failed - {specific_error}"
+      }
+    },
+    "application_errors": {
+      "timeout": "Error: Operation timed out after {seconds} seconds",
+      "no_windows": "No windows found on the system",
+      "invalid_arguments": "Error: Invalid command line arguments - use --help for usage information"
+    }
+  },
+  "performance_contracts": {
+    "enumeration_time": {
+      "target": "< 3 seconds",
+      "measurement": "Time from command execution to first window displayed"
+    },
+    "search_time": {
+      "target": "< 1 second",
+      "measurement": "Time from keyword input to filtered results displayed"
+    },
+    "window_capacity": {
+      "target": "50+ windows",
+      "measurement": "System must handle at least 50 concurrent windows without degradation"
+    },
+    "memory_usage": {
+      "target": "< 100 MB",
+      "measurement": "Peak memory usage during operation"
+    }
+  }
+}

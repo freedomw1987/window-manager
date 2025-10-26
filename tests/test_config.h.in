@@ -1,0 +1,60 @@
+#pragma once
+
+// Test configuration generated from CMake
+
+#define TEST_VERSION_MAJOR @PROJECT_VERSION_MAJOR@
+#define TEST_VERSION_MINOR @PROJECT_VERSION_MINOR@
+#define TEST_VERSION_PATCH @PROJECT_VERSION_PATCH@
+
+// Platform detection
+#cmakedefine01 WIN32
+#cmakedefine01 APPLE
+#cmakedefine01 UNIX
+
+// Test features
+#cmakedefine01 ENABLE_COVERAGE
+#cmakedefine01 ENABLE_PERFORMANCE_TESTS
+#cmakedefine01 ENABLE_INTEGRATION_TESTS
+
+// Test directories
+#define TEST_DATA_DIR "@CMAKE_CURRENT_SOURCE_DIR@/data"
+#define TEST_OUTPUT_DIR "@CMAKE_CURRENT_BINARY_DIR@/output"
+
+// Performance test thresholds
+#define WINDOW_ENUMERATION_TARGET_MS 3000
+#define SEARCH_FILTERING_TARGET_MS 1000
+#define WORKSPACE_ENUMERATION_TARGET_MS 1000
+
+// Test limits
+#define MAX_TEST_WINDOWS 100
+#define MAX_TEST_WORKSPACES 10
+#define TEST_TIMEOUT_MS 30000
+
+// Feature availability detection
+#ifdef _WIN32
+    #define HAS_VIRTUAL_DESKTOP_SUPPORT 1
+    #define WORKSPACE_API_NAME "Virtual Desktop Manager"
+#elif __APPLE__
+    #define HAS_SPACES_SUPPORT 1
+    #define WORKSPACE_API_NAME "Core Graphics + Accessibility"
+#elif __linux__
+    #define HAS_EWMH_SUPPORT 1
+    #define WORKSPACE_API_NAME "EWMH (X11)"
+#else
+    #define HAS_WORKSPACE_SUPPORT 0
+    #define WORKSPACE_API_NAME "None (fallback)"
+#endif
+
+// Debug configuration
+#ifdef DEBUG
+    #define TEST_DEBUG_OUTPUT 1
+    #define TEST_VERBOSE_LOGGING 1
+#else
+    #define TEST_DEBUG_OUTPUT 0
+    #define TEST_VERBOSE_LOGGING 0
+#endif
+
+// Test data paths
+#define COMPATIBILITY_REPORT_PATH "@CMAKE_CURRENT_BINARY_DIR@/compatibility_report.txt"
+#define PERFORMANCE_REPORT_PATH "@CMAKE_CURRENT_BINARY_DIR@/performance_report.txt"
+#define TEST_LOG_PATH "@CMAKE_CURRENT_BINARY_DIR@/test_log.txt"

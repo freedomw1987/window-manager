@@ -1,0 +1,94 @@
+# C++ compilation artifacts
+bin/
+obj/
+out/
+*.o
+*.so
+*.a
+*.exe
+*.dll
+*.dylib
+
+# CMake build artifacts (精確控制 - 只忽略構建產物，保留目錄結構)
+build/bin/
+build/lib/
+build/_deps/
+build/CMakeFiles/
+build/CMakeCache.txt
+build/cmake_install.cmake
+build/CTestTestfile.cmake
+build/Makefile
+build/*.cmake
+build/*.make
+build/Testing/
+build/CPackConfig.cmake
+build/CPackSourceConfig.cmake
+build/window-manager-tests[1]_include.cmake
+build/window-manager-tests[1]_tests.cmake
+!build/CMakeLists.txt
+!build/.gitkeep
+!build/README.md
+
+# Root level CMake artifacts
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+CTestTestfile.cmake
+Testing/
+*.cmake
+!CMakeLists.txt
+
+# IDE and editor files
+.vscode/
+.idea/
+*.user
+*.suo
+*.vcxproj.user
+*.sdf
+*.opensdf
+*.ipch
+*.swp
+*.swo
+*~
+
+# Google Test artifacts
+gtest/
+gtest_main/
+googletest/
+
+# Platform-specific files
+.DS_Store
+Thumbs.db
+*.tmp
+
+# Logs and temporary files
+*.log
+*.tmp
+*.swp
+
+# Environment and configuration
+.env*
+config.local.*
+
+# Dependencies and external libraries
+third_party/
+vendor/
+external/
+
+# Documentation build artifacts
+docs/_build/
+docs/html/
+docs/latex/
+
+# Coverage reports
+coverage/
+*.gcov
+*.gcda
+*.gcno
+
+# Profiling and debugging
+*.prof
+*.gprof
+*.valgrind
+core
+core.*
