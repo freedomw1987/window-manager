@@ -34,6 +34,10 @@ public:
     bool isWorkspaceSupported() const override;
     std::optional<WindowInfo> getFocusedWindow() override;
 
+    // NEW: Workspace switching operations (for cross-workspace focus)
+    bool switchToWorkspace(const std::string& workspaceId) override;
+    bool canSwitchWorkspaces() const override;
+
     // Performance and diagnostics
     std::chrono::milliseconds getLastEnumerationTime() const override;
     size_t getWindowCount() const override;

@@ -2,11 +2,13 @@
 
 #include "../core/window.hpp"
 #include "../core/workspace.hpp"
+#include "../core/focus_operation.hpp"
 #include "../filters/search_query.hpp"
 #include <vector>
 #include <string>
 #include <iostream>
 #include <map>
+#include <chrono>
 
 namespace WindowManager {
 
@@ -35,6 +37,10 @@ public:
     // Display methods for User Story 1
     void displayAllWindows(const std::vector<WindowInfo>& windows);
     void displayWindowInfo(const WindowInfo& window);
+
+    // T040-T041: Enhanced window display with handles
+    void displayAllWindowsWithHandles(const std::vector<WindowInfo>& windows, bool handlesOnly = false);
+    void displayWindowsHandlesOnly(const std::vector<WindowInfo>& windows);
 
     // NEW: Enhanced workspace-aware display methods (T029, T030)
     void displayAllWindowsWithWorkspaces(const std::vector<WindowInfo>& windows, const std::vector<WorkspaceInfo>& workspaces);
@@ -67,6 +73,16 @@ public:
     void displayCrossWorkspaceStatistics(const std::vector<WindowInfo>& allWindows, const std::vector<WorkspaceInfo>& workspaces);
     std::string formatWorkspaceInfo(const WorkspaceInfo& workspace, bool includeIndex = true);
 
+    // NEW: Focus command display methods (from contracts/focus_api.md)
+    void displayFocusSuccess(const std::string& handle, const std::string& title = "",
+                           const std::string& workspace = "", bool workspaceSwitched = false,
+                           std::chrono::milliseconds duration = std::chrono::milliseconds(0));
+    void displayFocusError(const std::string& handle, const std::string& error,
+                         const std::string& suggestion = "");
+    void displayFocusProgress(const std::string& handle, const std::string& status);
+    void displayHandleValidation(const std::string& handle, bool isValid,
+                               const std::string& reason = "");
+
     // Utility display methods
     void displayError(const std::string& message);
     void displaySuccess(const std::string& message);
@@ -88,6 +104,7 @@ private:
     // Text output helpers
     void displayWindowsAsText(const std::vector<WindowInfo>& windows);
     void displayWindowAsText(const WindowInfo& window, int index = -1);
+    void displayWindowsWithHandlesAsText(const std::vector<WindowInfo>& windows);
 
     // NEW: Workspace-aware text output helpers (T030)
     void displayWorkspaceGroupedAsText(const std::map<std::string, std::vector<WindowInfo>>& windowsByWorkspace, const std::vector<WorkspaceInfo>& workspaces);

@@ -34,6 +34,62 @@ void CLI::displayWindowInfo(const WindowInfo& window) {
     }
 }
 
+// T040-T041: Enhanced window display with handles implementation
+
+void CLI::displayAllWindowsWithHandles(const std::vector<WindowInfo>& windows, bool handlesOnly) {
+    if (handlesOnly) {
+        displayWindowsHandlesOnly(windows);
+        return;
+    }
+
+    if (outputFormat_ == "json") {
+        displayWindowsAsJson(windows);
+    } else {
+        displayWindowsWithHandlesAsText(windows);
+    }
+}
+
+void CLI::displayWindowsHandlesOnly(const std::vector<WindowInfo>& windows) {
+    if (windows.empty()) {
+        std::cout << "No windows found." << std::endl;
+        return;
+    }
+
+    if (outputFormat_ == "json") {
+        std::cout << "{\n";
+        std::cout << "  \"handles\": [\n";
+
+        for (size_t i = 0; i < windows.size(); ++i) {
+            std::cout << "    {\n";
+            std::cout << "      \"handle\": \"" << escapeJsonString(windows[i].handle) << "\",\n";
+            std::cout << "      \"title\": \"" << escapeJsonString(windows[i].title) << "\",\n";
+            std::cout << "      \"owner\": \"" << escapeJsonString(windows[i].ownerName) << "\"\n";
+            std::cout << "    }";
+
+            if (i < windows.size() - 1) {
+                std::cout << ",";
+            }
+            std::cout << "\n";
+        }
+
+        std::cout << "  ],\n";
+        std::cout << "  \"totalCount\": " << windows.size() << "\n";
+        std::cout << "}" << std::endl;
+    } else {
+        std::cout << "Window Handles (" << windows.size() << " total):" << std::endl;
+        std::cout << std::endl;
+
+        for (const auto& window : windows) {
+            std::cout << window.handle;
+            if (!window.title.empty()) {
+                std::cout << "  \"" << truncateString(window.title, 40) << "\"";
+            }
+            std::cout << "  (" << window.ownerName << ")";
+            std::cout << std::endl;
+        }
+    }
+}
+
 // NEW: Enhanced workspace-aware display methods (T029)
 
 void CLI::displayAllWindowsWithWorkspaces(const std::vector<WindowInfo>& windows, const std::vector<WorkspaceInfo>& workspaces) {
@@ -210,6 +266,37 @@ void CLI::displayWindowAsText(const WindowInfo& window, int index) {
     }
 
     std::cout << std::endl;
+}
+
+void CLI::displayWindowsWithHandlesAsText(const std::vector<WindowInfo>& windows) {
+    if (windows.empty()) {
+        std::cout << "No windows found." << std::endl;
+        return;
+    }
+
+    std::cout << "Windows with Handles (" << windows.size() << " total):" << std::endl;
+
+    for (size_t i = 0; i < windows.size(); ++i) {
+        const auto& window = windows[i];
+
+        std::cout << "[" << (i + 1) << "] Handle: " << window.handle << std::endl;
+        std::cout << "    Title: " << (window.title.empty() ? "(No Title)" : window.title) << std::endl;
+        std::cout << "    Owner: " << window.ownerName << std::endl;
+        std::cout << "    Position: " << formatPosition(window.x, window.y);
+        std::cout << "  Size: " << formatSize(window.width, window.height);
+        std::cout << "  PID: " << window.processId;
+
+        if (!window.isVisible) {
+            std::cout << "  [Hidden]";
+        }
+
+        std::cout << std::endl;
+
+        // Add separator between windows (except for the last one)
+        if (i < windows.size() - 1) {
+            std::cout << std::endl;
+        }
+    }
 }
 
 // JSON output implementation
@@ -1161,6 +1248,128 @@ std::string CLI::formatWorkspaceInfo(const WorkspaceInfo& workspace, bool includ
 
     oss << ")";
     return oss.str();
+}
+
+// NEW: Focus command display method implementations
+
+void CLI::displayFocusSuccess(const std::string& handle, const std::string& title,
+                            const std::string& workspace, bool workspaceSwitched,
+                            std::chrono::milliseconds duration) {
+    if (outputFormat_ == "json") {
+        std::ostringstream jsonOutput;
+        jsonOutput << "{\n";
+        jsonOutput << "  \"status\": \"success\",\n";
+        jsonOutput << "  \"operation\": {\n";
+        jsonOutput << "    \"type\": \"focus_window\",\n";
+        jsonOutput << "    \"handle\": \"" << escapeJsonString(handle) << "\",\n";
+        jsonOutput << "    \"duration_ms\": " << duration.count() << ",\n";
+        jsonOutput << "    \"workspace_switched\": " << (workspaceSwitched ? "true" : "false") << "\n";
+        jsonOutput << "  }";
+
+        if (!title.empty() || !workspace.empty()) {
+            jsonOutput << ",\n  \"window\": {\n";
+            jsonOutput << "    \"handle\": \"" << escapeJsonString(handle) << "\"";
+            if (!title.empty()) {
+                jsonOutput << ",\n    \"title\": \"" << escapeJsonString(title) << "\"";
+            }
+            if (!workspace.empty()) {
+                jsonOutput << ",\n    \"workspace\": \"" << escapeJsonString(workspace) << "\"";
+            }
+            jsonOutput << "\n  }";
+        }
+
+        jsonOutput << "\n}";
+        std::cout << jsonOutput.str() << std::endl;
+    } else {
+        std::cout << "✓ Window focused successfully" << std::endl;
+        std::cout << "  Handle: " << handle << std::endl;
+
+        if (!title.empty()) {
+            std::cout << "  Title: \"" << title << "\"" << std::endl;
+        }
+
+        if (!workspace.empty()) {
+            if (workspaceSwitched) {
+                std::cout << "  Workspace: " << workspace << " (switched)" << std::endl;
+            } else {
+                std::cout << "  Workspace: " << workspace << std::endl;
+            }
+        }
+
+        if (duration.count() > 0) {
+            std::cout << "  Time: " << std::fixed << std::setprecision(1)
+                     << (duration.count() / 1000.0) << " seconds" << std::endl;
+        }
+    }
+}
+
+void CLI::displayFocusError(const std::string& handle, const std::string& error,
+                          const std::string& suggestion) {
+    if (outputFormat_ == "json") {
+        std::ostringstream jsonOutput;
+        jsonOutput << "{\n";
+        jsonOutput << "  \"status\": \"error\",\n";
+        jsonOutput << "  \"error\": {\n";
+        jsonOutput << "    \"message\": \"" << escapeJsonString(error) << "\",\n";
+        jsonOutput << "    \"handle\": \"" << escapeJsonString(handle) << "\"";
+
+        if (!suggestion.empty()) {
+            jsonOutput << ",\n    \"suggestion\": \"" << escapeJsonString(suggestion) << "\"";
+        }
+
+        jsonOutput << "\n  }\n}";
+        std::cout << jsonOutput.str() << std::endl;
+    } else {
+        std::cout << "✗ Failed to focus window" << std::endl;
+        std::cout << "  Handle: " << handle << std::endl;
+        std::cout << "  Error: " << error << std::endl;
+
+        if (!suggestion.empty()) {
+            std::cout << "  Suggestion: " << suggestion << std::endl;
+        }
+    }
+}
+
+void CLI::displayFocusProgress(const std::string& handle, const std::string& status) {
+    if (verbose_) {
+        if (outputFormat_ == "json") {
+            std::ostringstream jsonOutput;
+            jsonOutput << "{\n";
+            jsonOutput << "  \"status\": \"progress\",\n";
+            jsonOutput << "  \"handle\": \"" << escapeJsonString(handle) << "\",\n";
+            jsonOutput << "  \"message\": \"" << escapeJsonString(status) << "\"\n";
+            jsonOutput << "}";
+            std::cout << jsonOutput.str() << std::endl;
+        } else {
+            std::cout << "→ " << status << " (handle: " << handle << ")" << std::endl;
+        }
+    }
+}
+
+void CLI::displayHandleValidation(const std::string& handle, bool isValid,
+                                const std::string& reason) {
+    if (outputFormat_ == "json") {
+        std::ostringstream jsonOutput;
+        jsonOutput << "{\n";
+        jsonOutput << "  \"handle\": \"" << escapeJsonString(handle) << "\",\n";
+        jsonOutput << "  \"valid\": " << (isValid ? "true" : "false");
+
+        if (!reason.empty()) {
+            jsonOutput << ",\n  \"reason\": \"" << escapeJsonString(reason) << "\"";
+        }
+
+        jsonOutput << "\n}";
+        std::cout << jsonOutput.str() << std::endl;
+    } else {
+        if (isValid) {
+            std::cout << "✓ Handle is valid: " << handle << std::endl;
+        } else {
+            std::cout << "✗ Handle is invalid: " << handle << std::endl;
+            if (!reason.empty()) {
+                std::cout << "  Reason: " << reason << std::endl;
+            }
+        }
+    }
 }
 
 } // namespace WindowManager

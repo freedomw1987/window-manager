@@ -146,6 +146,22 @@ bool X11Enumerator::focusWindow(const std::string& handle) {
         return false;
     }
 
+    // Enhanced for User Story 2: Check if cross-workspace switching is needed
+    if (ewmhSupported_) {
+        // Get the window's desktop index
+        int windowDesktop = getWindowDesktopIndex(window);
+        int currentDesktop = getCurrentDesktopIndex();
+
+        if (windowDesktop >= 0 && currentDesktop >= 0 && windowDesktop != currentDesktop) {
+            // Window is on a different desktop - attempt to switch
+            std::string targetWorkspaceId = std::to_string(windowDesktop);
+            if (switchToWorkspace(targetWorkspaceId)) {
+                // Wait for workspace switch to complete
+                usleep(200000); // 200ms wait
+            }
+        }
+    }
+
     // Raise the window and give it focus
     XRaiseWindow(display_, window);
     XSetInputFocus(display_, window, RevertToPointerRoot, CurrentTime);
@@ -155,21 +171,142 @@ bool X11Enumerator::focusWindow(const std::string& handle) {
 }
 
 bool X11Enumerator::isWindowValid(const std::string& handle) {
-    Window window = stringToHandle(handle);
-    if (window == 0) {
+    // Enhanced comprehensive handle validation for User Story 3
+
+    // First check: handle format validation (comprehensive)
+    if (handle.empty()) {
         return false;
     }
 
+    // Check for valid hexadecimal format
+    if (handle.length() > 16) { // 64-bit pointer max length
+        return false;
+    }
+
+    // Validate hexadecimal characters
+    for (char c : handle) {
+        if (!std::isxdigit(c)) {
+            return false;
+        }
+    }
+
+    // Convert and validate handle value
+    Window window = stringToHandle(handle);
+    if (window == 0 || window == None) {
+        return false;
+    }
+
+    // Check for obviously invalid window IDs (X11 Window IDs are typically > 0x100000)
+    if (window < 0x100000) {
+        return false;
+    }
+
+    // Verify display connection is available
+    if (!display_) {
+        return false;
+    }
+
+    // Second check: verify window still exists in X11 tree
     Window root, parent;
-    Window* children;
+    Window* children = nullptr;
     unsigned int nchildren;
 
-    int result = XQueryTree(display_, window, &root, &parent, &children, &nchildren);
+    // Set error handler to catch BadWindow errors
+    XErrorHandler oldHandler = XSetErrorHandler([](Display*, XErrorEvent* error) -> int {
+        return (error->error_code == BadWindow) ? 0 : 1;
+    });
+
+    int queryResult = XQueryTree(display_, window, &root, &parent, &children, &nchildren);
     if (children) {
         XFree(children);
     }
 
-    return result != 0;
+    XSetErrorHandler(oldHandler); // Restore original error handler
+
+    if (queryResult == 0) {
+        return false; // Window doesn't exist in X11 hierarchy
+    }
+
+    // Third check: verify window attributes are accessible
+    XWindowAttributes attrs;
+    if (XGetWindowAttributes(display_, window, &attrs) == 0) {
+        return false; // Cannot access window attributes
+    }
+
+    // Fourth check: verify window has reasonable dimensions
+    if (attrs.width <= 0 || attrs.height <= 0 ||
+        attrs.width > 10000 || attrs.height > 10000) {
+        return false; // Invalid window dimensions
+    }
+
+    // Fifth check: verify window position is reasonable (not massively off-screen)
+    if (attrs.x < -5000 || attrs.x > 5000 || attrs.y < -5000 || attrs.y > 5000) {
+        return false; // Window too far off-screen
+    }
+
+    // Sixth check: verify window class (not InputOnly)
+    if (attrs.class == InputOnly) {
+        return false; // InputOnly windows are not user windows
+    }
+
+    // Seventh check: verify window depth is reasonable
+    if (attrs.depth == 0 || attrs.depth > 32) {
+        return false; // Invalid color depth
+    }
+
+    // Eighth check: verify window is not completely unmapped and forgotten
+    if (attrs.map_state == IsUnviewable) {
+        // Check if window is still valid by trying to get its properties
+        Atom actualType;
+        int actualFormat;
+        unsigned long nItems, bytesAfter;
+        unsigned char* prop = nullptr;
+
+        // Try to get WM_NAME property to verify window is still managed
+        int result = XGetWindowProperty(display_, window, XA_WM_NAME, 0, 1,
+                                       False, XA_STRING, &actualType, &actualFormat,
+                                       &nItems, &bytesAfter, &prop);
+
+        if (prop) XFree(prop);
+
+        if (result != Success) {
+            return false; // Window properties are not accessible
+        }
+    }
+
+    // Ninth check: verify window is not a root window or desktop
+    if (window == DefaultRootWindow(display_) || window == rootWindow_) {
+        return false; // Root window is not a valid target
+    }
+
+    // Tenth check: verify window is not a subwindow of root (direct child)
+    if (parent == rootWindow_ && attrs.class == InputOutput) {
+        // This might be a top-level window, which is good
+        // But verify it's not a window manager decoration or panel
+
+        // Check if window has WM_CLASS property (indicates it's an application window)
+        XClassHint classHint;
+        if (XGetClassHint(display_, window, &classHint) == Success) {
+            if (classHint.res_class) XFree(classHint.res_class);
+            if (classHint.res_name) XFree(classHint.res_name);
+            // Having WM_CLASS is a good sign it's a real application window
+        } else {
+            // No WM_CLASS might indicate a decorator or system window
+            return false;
+        }
+    }
+
+    // Eleventh check: verify window is not a override-redirect window (tooltips, menus, etc.)
+    if (attrs.override_redirect == True) {
+        return false; // Override-redirect windows are typically not user-focusable
+    }
+
+    // Twelfth check: verify window backing store is reasonable
+    if (attrs.backing_store != NotUseful && attrs.backing_store != WhenMapped && attrs.backing_store != Always) {
+        return false; // Invalid backing store value
+    }
+
+    return true;
 }
 
 std::chrono::milliseconds X11Enumerator::getLastEnumerationTime() const {
@@ -607,6 +744,62 @@ int X11Enumerator::getWindowDesktopIndex(Window window) {
 
     long desktop = static_cast<long>(getPropertyLong(window, netWmDesktopAtom_));
     return static_cast<int>(desktop);
+}
+
+// NEW: Workspace switching operations (for cross-workspace focus)
+bool X11Enumerator::switchToWorkspace(const std::string& workspaceId) {
+    // Implementation for User Story 2 - Linux X11 workspace switching
+
+    if (!ewmhSupported_ || !display_) {
+        return false; // EWMH not supported or no display connection
+    }
+
+    // Convert workspace ID to integer
+    int workspaceIndex;
+    try {
+        workspaceIndex = std::stoi(workspaceId);
+    } catch (const std::exception&) {
+        return false; // Invalid workspace ID format
+    }
+
+    // Validate workspace index
+    if (workspaceIndex < 0) {
+        return false;
+    }
+
+    try {
+        // Create a client message to switch desktop
+        XEvent event;
+        event.type = ClientMessage;
+        event.xclient.window = rootWindow_;
+        event.xclient.message_type = netCurrentDesktopAtom_;
+        event.xclient.format = 32;
+        event.xclient.data.l[0] = workspaceIndex;
+        event.xclient.data.l[1] = CurrentTime;
+        event.xclient.data.l[2] = 0;
+        event.xclient.data.l[3] = 0;
+        event.xclient.data.l[4] = 0;
+
+        // Send the message to the window manager
+        int result = XSendEvent(display_, rootWindow_, False,
+                               SubstructureRedirectMask | SubstructureNotifyMask,
+                               &event);
+
+        if (result != 0) {
+            XFlush(display_);
+            return true;
+        }
+
+        return false;
+    } catch (...) {
+        return false;
+    }
+}
+
+bool X11Enumerator::canSwitchWorkspaces() const {
+    // Check if EWMH workspace switching is supported
+    // This requires EWMH support and a compatible window manager
+    return ewmhSupported_ && display_ != nullptr;
 }
 
 } // namespace WindowManager

@@ -15,8 +15,11 @@
 #include "platform_config.h"
 
 // Function declarations for different modes
-int listWindows(bool verbose = false, const std::string& format = "text");
+int listWindows(bool verbose = false, const std::string& format = "text", bool showHandles = false, bool handlesOnly = false);
 int searchWindows(const std::string& keyword, bool caseSensitive = false, bool verbose = false, const std::string& format = "text");
+int focusWindow(const std::string& handle, bool verbose = false, const std::string& format = "text",
+                bool allowWorkspaceSwitch = true, int timeout = 5);
+int validateHandle(const std::string& handle, bool verbose = false, const std::string& format = "text");
 int interactiveMode(const std::string& format = "text");
 void printUsage(const char* programName);
 void printVersion();
@@ -77,7 +80,20 @@ int main(int argc, char* argv[]) {
 
         // Execute commands
         if (command == "list") {
-            return listWindows(verbose, format);
+            // T040-T041: Parse list-specific options
+            bool showHandles = false;
+            bool handlesOnly = false;
+
+            for (size_t i = 2; i < args.size(); ++i) {
+                if (args[i] == "--show-handles") {
+                    showHandles = true;
+                } else if (args[i] == "--handles-only") {
+                    handlesOnly = true;
+                }
+                // Other options like --verbose and --format are already parsed above
+            }
+
+            return listWindows(verbose, format, showHandles, handlesOnly);
         } else if (command == "search") {
             if (args.size() < 3) {
                 std::cerr << "Error: search command requires a keyword\n";
@@ -86,6 +102,45 @@ int main(int argc, char* argv[]) {
             }
             std::string keyword = args[2];
             return searchWindows(keyword, caseSensitive, verbose, format);
+        } else if (command == "focus") {
+            if (args.size() < 3) {
+                std::cerr << "Error: focus command requires a window handle\n";
+                printUsage(argv[0]);
+                return 1;
+            }
+            std::string handle = args[2];
+
+            // Parse focus-specific options
+            bool allowWorkspaceSwitch = true;  // Default: allow workspace switching (User Story 2)
+            int timeout = 5;  // Default timeout in seconds
+
+            for (size_t i = 3; i < args.size(); ++i) {
+                if (args[i] == "--no-workspace-switch") {
+                    allowWorkspaceSwitch = false;
+                } else if (args[i] == "--timeout") {
+                    if (i + 1 < args.size()) {
+                        try {
+                            timeout = std::stoi(args[++i]);
+                        } catch (const std::exception&) {
+                            std::cerr << "Error: Invalid timeout value\n";
+                            return 1;
+                        }
+                    } else {
+                        std::cerr << "Error: --timeout requires a value\n";
+                        return 1;
+                    }
+                }
+            }
+
+            return focusWindow(handle, verbose, format, allowWorkspaceSwitch, timeout);
+        } else if (command == "validate-handle") {
+            if (args.size() < 3) {
+                std::cerr << "Error: validate-handle command requires a window handle\n";
+                printUsage(argv[0]);
+                return 1;
+            }
+            std::string handle = args[2];
+            return validateHandle(handle, verbose, format);
         } else if (command == "interactive") {
             return interactiveMode(format);
         } else {
@@ -119,7 +174,7 @@ int main(int argc, char* argv[]) {
     }
 }
 
-int listWindows(bool verbose, const std::string& format) {
+int listWindows(bool verbose, const std::string& format, bool showHandles, bool handlesOnly) {
     try {
         // Create window manager
         auto windowManager = WindowManager::WindowManager::create();
@@ -135,8 +190,12 @@ int listWindows(bool verbose, const std::string& format) {
         auto end = std::chrono::steady_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
 
-        // Display windows
-        cli.displayAllWindows(windows);
+        // Display windows based on options
+        if (showHandles || handlesOnly) {
+            cli.displayAllWindowsWithHandles(windows, handlesOnly);
+        } else {
+            cli.displayAllWindows(windows);
+        }
 
         // Show performance stats if verbose
         if (verbose) {
@@ -225,6 +284,174 @@ int searchWindows(const std::string& keyword, bool caseSensitive, bool verbose, 
     }
 }
 
+int focusWindow(const std::string& handle, bool verbose, const std::string& format,
+                bool allowWorkspaceSwitch, int timeout) {
+    // T043: Use timeout parameter for focus operations
+    try {
+        // Create window manager
+        auto windowManager = WindowManager::WindowManager::create();
+
+        // Set up CLI
+        WindowManager::CLI cli;
+        cli.setOutputFormat(format);
+        cli.setVerbose(verbose);
+
+        // Show progress if verbose
+        if (verbose) {
+            cli.displayFocusProgress(handle, "Validating window handle");
+        }
+
+        // T043: Validate handle with custom timeout
+        if (!windowManager->validateHandleWithTimeout(handle, std::chrono::milliseconds(timeout * 1000))) {
+            cli.displayFocusError(handle, "Handle validation failed or timed out",
+                                "Check if the window handle is valid and accessible");
+            return 1;
+        }
+
+        // Attempt to focus the window
+        auto startTime = std::chrono::steady_clock::now();
+        bool success = windowManager->focusWindowByHandle(handle, allowWorkspaceSwitch); // User Story 2: support workspace switching
+        auto endTime = std::chrono::steady_clock::now();
+        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime);
+
+        if (success) {
+            // Get window information for display
+            auto windowInfo = windowManager->getWindowByHandle(handle);
+            std::string title = windowInfo ? windowInfo->title : "";
+            std::string workspace = windowInfo ? windowInfo->workspaceName : "";
+            bool workspaceSwitched = windowInfo ? !windowInfo->isOnCurrentWorkspace : false;
+
+            cli.displayFocusSuccess(handle, title, workspace, workspaceSwitched, duration);
+
+            // Check performance requirements (SC-001/SC-002)
+            if (verbose) {
+                std::chrono::milliseconds threshold = workspaceSwitched ?
+                    std::chrono::milliseconds(2000) :  // SC-002: < 2 seconds for cross-workspace
+                    std::chrono::milliseconds(1000);   // SC-001: < 1 second for current workspace
+
+                if (duration <= threshold) {
+                    cli.displayInfo("Performance requirement met (" +
+                                  std::to_string(threshold.count()) + "ms threshold)");
+                } else {
+                    cli.displayError("Performance requirement not met (took " +
+                                   std::to_string(duration.count()) + "ms, threshold: " +
+                                   std::to_string(threshold.count()) + "ms)");
+                }
+            }
+
+            return 0;
+        } else {
+            // Focus failed - determine why and provide helpful error message
+            if (!windowManager->validateHandle(handle)) {
+                cli.displayFocusError(handle, "Invalid window handle",
+                                    "Use 'window-manager list --show-handles' to see available windows");
+            } else {
+                auto windowInfo = windowManager->getWindowByHandle(handle);
+                if (!windowInfo) {
+                    cli.displayFocusError(handle, "Window not found",
+                                        "Window may have been closed or is no longer available");
+                } else if (!windowInfo->isOnCurrentWorkspace && !allowWorkspaceSwitch) {
+                    cli.displayFocusError(handle, "Window is in different workspace",
+                                        "Try without --no-workspace-switch option to allow workspace switching");
+                } else {
+                    cli.displayFocusError(handle, "Failed to focus window",
+                                        "Window may be restricted or require elevated permissions");
+                }
+            }
+            return 1;
+        }
+
+    } catch (const WindowManager::WindowManagerException& e) {
+        std::cerr << "Window Manager Error: " << e.what() << std::endl;
+        return 1;
+    } catch (const std::exception& e) {
+        std::cerr << "Error: " << e.what() << std::endl;
+        return 1;
+    }
+}
+
+int validateHandle(const std::string& handle, bool verbose, const std::string& format) {
+    try {
+        // Create window manager
+        auto windowManager = WindowManager::WindowManager::create();
+
+        // Set up CLI
+        WindowManager::CLI cli;
+        cli.setOutputFormat(format);
+        cli.setVerbose(verbose);
+
+        // Show progress if verbose
+        if (verbose) {
+            cli.displayFocusProgress(handle, "Validating window handle format and existence");
+        }
+
+        auto startTime = std::chrono::steady_clock::now();
+
+        // Validate the handle
+        bool isValid = windowManager->validateHandle(handle);
+
+        auto endTime = std::chrono::steady_clock::now();
+        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime);
+
+        if (isValid) {
+            // Get additional window information for validation
+            auto windowInfo = windowManager->getWindowByHandle(handle);
+            std::string reason = "Window exists and is accessible";
+
+            if (windowInfo) {
+                if (!windowInfo->focusable) {
+                    reason = "Window exists but may not be focusable";
+                } else if (windowInfo->requiresRestore) {
+                    reason = "Window exists, focusable, but currently minimized";
+                } else if (windowInfo->workspaceSwitchRequired) {
+                    reason = "Window exists, focusable, but requires workspace switching";
+                }
+            }
+
+            cli.displayHandleValidation(handle, true, reason);
+
+            // Additional verbose information
+            if (verbose && windowInfo) {
+                cli.displayInfo("Window title: \"" + windowInfo->title + "\"");
+                cli.displayInfo("Workspace: " + windowInfo->workspaceName);
+                cli.displayInfo("Process: " + windowInfo->ownerName + " (PID: " + std::to_string(windowInfo->processId) + ")");
+            }
+        } else {
+            std::string reason = "Handle format invalid or window not found";
+
+            // Try to provide more specific error information
+            if (handle.empty()) {
+                reason = "Handle cannot be empty";
+            } else if (handle.find_first_not_of("0123456789") != std::string::npos) {
+                reason = "Handle must be numeric (platform-specific window ID)";
+            } else {
+                reason = "Window with this handle does not exist or is not accessible";
+            }
+
+            cli.displayHandleValidation(handle, false, reason);
+        }
+
+        // Check performance requirements (SC-003: < 0.5 seconds for validation)
+        if (verbose) {
+            if (duration <= std::chrono::milliseconds(500)) {
+                cli.displayInfo("Validation performance requirement met (< 0.5 seconds)");
+            } else {
+                cli.displayError("Validation performance requirement not met (took " +
+                               std::to_string(duration.count()) + "ms)");
+            }
+        }
+
+        return isValid ? 0 : 1;
+
+    } catch (const WindowManager::WindowManagerException& e) {
+        std::cerr << "Window Manager Error: " << e.what() << std::endl;
+        return 1;
+    } catch (const std::exception& e) {
+        std::cerr << "Error: " << e.what() << std::endl;
+        return 1;
+    }
+}
+
 int interactiveMode(const std::string& format) {
     try {
         // Create window manager
@@ -256,6 +483,8 @@ void printUsage(const char* programName) {
     std::cout << "Commands:\n";
     std::cout << "  list                    List all windows\n";
     std::cout << "  search <keyword>        Search windows by keyword\n";
+    std::cout << "  focus <handle>          Focus window by handle (with workspace switching)\n";
+    std::cout << "  validate-handle <handle> Validate window handle format and existence\n";
     std::cout << "  interactive             Start interactive filtering mode\n\n";
     std::cout << "Options:\n";
     std::cout << "  --help, -h              Show this help message\n";
@@ -263,12 +492,24 @@ void printUsage(const char* programName) {
     std::cout << "  --platform-help         Show platform-specific setup information\n";
     std::cout << "  --format, -f <format>   Output format (text|json)\n";
     std::cout << "  --verbose               Enable verbose output\n";
-    std::cout << "  --case-sensitive, -c    Enable case-sensitive search\n\n";
+    std::cout << "  --case-sensitive, -c    Enable case-sensitive search\n";
+    std::cout << "  --no-workspace-switch   Prevent automatic workspace switching (focus command)\n";
+    std::cout << "  --timeout <seconds>     Set operation timeout (focus command)\n";
+    std::cout << "  --show-handles          Show window handles in list output\n";
+    std::cout << "  --handles-only          Show only handles and titles (compact format)\n\n";
     std::cout << "Examples:\n";
     std::cout << "  " << programName << " list\n";
     std::cout << "  " << programName << " list --format json --verbose\n";
+    std::cout << "  " << programName << " list --show-handles\n";
+    std::cout << "  " << programName << " list --handles-only\n";
     std::cout << "  " << programName << " search chrome\n";
     std::cout << "  " << programName << " search \"Google Chrome\" --case-sensitive\n";
+    std::cout << "  " << programName << " focus 12345\n";
+    std::cout << "  " << programName << " focus 12345 --verbose\n";
+    std::cout << "  " << programName << " focus 12345 --no-workspace-switch\n";
+    std::cout << "  " << programName << " focus 12345 --timeout 10\n";
+    std::cout << "  " << programName << " validate-handle 12345\n";
+    std::cout << "  " << programName << " validate-handle 12345 --format json\n";
     std::cout << "  " << programName << " interactive\n";
 }
 

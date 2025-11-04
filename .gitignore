@@ -95,5 +95,4 @@ coverage/
 *.prof
 *.gprof
 *.valgrind
-core
 core.*

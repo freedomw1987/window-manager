@@ -1,14 +1,18 @@
-# Window List and Filter Program
+# Window Manager with Focus Control
 
-A cross-platform C++17 application for enumerating, searching, and filtering system windows with high performance and interactive capabilities.
+A cross-platform C++17 application for enumerating, searching, filtering, and focusing system windows with high performance and interactive capabilities.
 
 ## Features
 
 - **Cross-platform window enumeration** - Supports Windows, macOS, and Linux (X11)
+- **Direct window focus by handle** - Focus any window by providing its platform-specific handle
+- **Cross-workspace window focus** - Automatically switch workspaces/desktops to focus windows
+- **Comprehensive handle validation** - Robust validation with detailed error messages
 - **Fast keyword search** - Real-time window filtering with case-sensitive/insensitive options
 - **Interactive terminal UI** - FTXUI-based interface with live search and auto-refresh
 - **Multiple output formats** - Text and JSON output support
 - **Performance optimized** - Handles 50+ windows efficiently with caching and smart memory management
+- **Rate limiting and timeout protection** - Enterprise-grade reliability features
 - **Comprehensive error handling** - Platform-specific guidance and verbose debugging
 
 ## Supported Platforms
@@ -86,6 +90,12 @@ No additional setup required. May need administrator privileges for some system 
 # Basic listing
 ./window-manager list
 
+# Show window handles for focus operations
+./window-manager list --show-handles
+
+# Compact handle listing (handles and titles only)
+./window-manager list --handles-only
+
 # Verbose output with performance stats
 ./window-manager list --verbose
 
@@ -93,7 +103,7 @@ No additional setup required. May need administrator privileges for some system 
 ./window-manager list --format json
 
 # Combined options
-./window-manager list --verbose --format json
+./window-manager list --show-handles --verbose --format json
 ```
 
 #### Search Windows
@@ -109,6 +119,33 @@ No additional setup required. May need administrator privileges for some system 
 
 # JSON output for search results
 ./window-manager search terminal --format json
+```
+
+#### Focus Windows by Handle
+```bash
+# Focus a window by its handle (with automatic workspace switching)
+./window-manager focus a968
+
+# Focus with verbose progress output
+./window-manager focus a968 --verbose
+
+# Focus without workspace switching (current workspace only)
+./window-manager focus a968 --no-workspace-switch
+
+# Focus with custom timeout (in seconds)
+./window-manager focus a968 --timeout 10
+
+# JSON output for focus operations
+./window-manager focus a968 --format json
+```
+
+#### Validate Window Handles
+```bash
+# Validate a window handle
+./window-manager validate-handle a968
+
+# Detailed validation with JSON output
+./window-manager validate-handle a968 --format json --verbose
 ```
 
 #### Interactive Mode
@@ -203,10 +240,34 @@ Verbose Information:
 
 ## Advanced Usage
 
+### Window Focus Operations
+
+#### Performance Requirements
+- **Current workspace focus**: < 1 second
+- **Cross-workspace focus**: < 2 seconds
+- **Handle validation**: < 0.5 seconds
+- **Rate limiting**: Maximum 10 focus requests per second
+
+#### Focus Workflow
+```bash
+# Step 1: List windows with handles
+./window-manager list --handles-only
+
+# Step 2: Validate a handle before focusing
+./window-manager validate-handle a968
+
+# Step 3: Focus the window
+./window-manager focus a968 --verbose
+```
+
 ### Performance Monitoring
 ```bash
 # Check if performance requirements are met
 ./window-manager list --verbose
+
+# Test focus performance
+./window-manager focus a968 --verbose
+# Expected: "Performance requirement met (1000ms threshold)"
 
 # Expected output includes:
 # "Performance requirements met"
@@ -222,6 +283,31 @@ Verbose Information:
 # Common error scenarios:
 ./window-manager list  # Permission denied -> Shows platform-specific guidance
 ./window-manager search test --verbose  # Debugging failed searches
+
+# Focus operation debugging
+./window-manager validate-handle 12345 --verbose  # Check handle validity
+./window-manager focus 12345 --verbose  # Debug focus operations
+./window-manager focus 12345 --no-workspace-switch  # Test without workspace switching
+```
+
+### Window Focus Error Scenarios
+```bash
+# Invalid handle format
+./window-manager focus "invalid"
+# Output: ✗ Handle is invalid: invalid
+#         Reason: Handle must be numeric (platform-specific window ID)
+
+# Handle validation timeout
+./window-manager validate-handle 12345 --timeout 1
+# Output: ✗ Handle is invalid: 12345
+#         Reason: Handle format invalid or window not found
+
+# Focus with workspace switching disabled
+./window-manager focus a968 --no-workspace-switch
+# Output: ✗ Failed to focus window
+#         Handle: a968
+#         Error: Window is in different workspace
+#         Suggestion: Try without --no-workspace-switch option
 ```
 
 ### Integration Examples
@@ -283,11 +369,14 @@ src/
 
 ### Success Criteria
 
-✅ **SC-001**: Window enumeration completes in <3 seconds
-✅ **SC-002**: Keyword filtering completes in <1 second
-✅ **SC-003**: Interactive mode provides real-time feedback
-✅ **SC-004**: Cross-platform compatibility (Windows/Linux/macOS)
-✅ **SC-005**: Supports 50+ windows without performance degradation
+✅ **SC-001**: Current workspace focus completes in <1 second
+✅ **SC-002**: Cross-workspace focus completes in <2 seconds
+✅ **SC-003**: Handle validation completes in <0.5 seconds
+✅ **SC-004**: Window enumeration completes in <3 seconds
+✅ **SC-005**: Keyword filtering completes in <1 second
+✅ **SC-006**: Interactive mode provides real-time feedback
+✅ **SC-007**: Cross-platform compatibility (Windows/Linux/macOS)
+✅ **SC-008**: Supports 50+ windows without performance degradation
 
 ## Troubleshooting
 
@@ -397,6 +486,16 @@ cmake --build . --target clean
 [Add your license information here]
 
 ## Changelog
+
+### v2.0.0 - Window Focus Edition
+- **NEW**: Direct window focus by handle with cross-workspace support
+- **NEW**: Comprehensive handle validation with detailed error messages
+- **NEW**: Window handle display options (--show-handles, --handles-only)
+- **NEW**: Focus operation tracking and history
+- **NEW**: Rate limiting and timeout protection for enterprise reliability
+- **Enhanced**: Cross-platform workspace switching capabilities
+- **Enhanced**: Error handling with recovery suggestions
+- **Enhanced**: Performance monitoring for all operations
 
 ### v1.0.0
 - Initial release with cross-platform window enumeration

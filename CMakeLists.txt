@@ -55,6 +55,8 @@ set(CORE_SOURCES
     src/core/window_manager.cpp
     src/core/workspace.cpp
     src/core/exceptions.cpp
+    src/core/focus_operation.cpp
+    src/core/focus_request.cpp
     src/ui/cli.cpp
     src/ui/interactive.cpp
     src/filters/search_query.cpp
@@ -105,6 +107,8 @@ if(BUILD_TESTING)
         src/core/window_manager.cpp
         src/core/workspace.cpp
         src/core/exceptions.cpp
+        src/core/focus_operation.cpp
+        src/core/focus_request.cpp
         src/ui/cli.cpp
         src/ui/interactive.cpp
         src/filters/search_query.cpp

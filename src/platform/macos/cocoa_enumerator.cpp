@@ -7,6 +7,8 @@
 #include <iostream>
 #include <set>
 #include <map>
+#include <errno.h>
+#include <signal.h>
 #include <Carbon/Carbon.h>
 
 namespace WindowManager {
@@ -132,7 +134,21 @@ bool CocoaEnumerator::focusWindow(const std::string& handle) {
 
     pid_t pid;
     CFNumberGetValue(pidRef, kCFNumberSInt32Type, &pid);
+
+    // Enhanced for User Story 2: Check if cross-workspace switching is needed
+    // Get window's workspace information before releasing windowList
+    std::string windowWorkspaceId = getWindowWorkspaceId(windowId, windowInfo);
+    bool isOnCurrent = isWindowOnCurrentWorkspace(windowId, windowInfo);
+
     CFRelease(windowList);
+
+    if (!windowWorkspaceId.empty() && !isOnCurrent) {
+        // Window is on a different workspace - attempt to switch
+        if (switchToWorkspace(windowWorkspaceId)) {
+            // Wait for workspace switch to complete
+            usleep(200000); // 200ms wait
+        }
+    }
 
     // Focus the application
     ProcessSerialNumber psn;
@@ -145,19 +161,132 @@ bool CocoaEnumerator::focusWindow(const std::string& handle) {
 }
 
 bool CocoaEnumerator::isWindowValid(const std::string& handle) {
+    // Enhanced comprehensive handle validation for User Story 3
+
+    // First check: handle format validation (comprehensive)
+    if (handle.empty()) {
+        return false;
+    }
+
+    // Check for valid hexadecimal format
+    if (handle.length() > 16) { // 64-bit pointer max length
+        return false;
+    }
+
+    // Validate hexadecimal characters
+    for (char c : handle) {
+        if (!std::isxdigit(c)) {
+            return false;
+        }
+    }
+
+    // Convert and validate handle value
     CGWindowID windowId = stringToHandle(handle);
     if (windowId == 0) {
         return false;
     }
 
-    CFArrayRef windowList = CGWindowListCopyWindowInfo(kCGWindowListOptionIncludingWindow, windowId);
-    bool valid = windowList && CFArrayGetCount(windowList) > 0;
-
-    if (windowList) {
-        CFRelease(windowList);
+    // Check for obviously invalid window IDs (CGWindowID is typically > 100)
+    if (windowId < 100) {
+        return false;
     }
 
-    return valid;
+    // Second check: verify window still exists in window server
+    CFArrayRef windowList = CGWindowListCopyWindowInfo(kCGWindowListOptionIncludingWindow, windowId);
+    if (!windowList || CFArrayGetCount(windowList) == 0) {
+        if (windowList) CFRelease(windowList);
+        return false;
+    }
+
+    CFDictionaryRef windowInfo = static_cast<CFDictionaryRef>(CFArrayGetValueAtIndex(windowList, 0));
+    if (!windowInfo) {
+        CFRelease(windowList);
+        return false;
+    }
+
+    // Third check: verify window properties are accessible
+    CFNumberRef layerRef = static_cast<CFNumberRef>(CFDictionaryGetValue(windowInfo, kCGWindowLayer));
+    CFNumberRef pidRef = static_cast<CFNumberRef>(CFDictionaryGetValue(windowInfo, kCGWindowOwnerPID));
+    CFNumberRef windowIdRef = static_cast<CFNumberRef>(CFDictionaryGetValue(windowInfo, kCGWindowNumber));
+
+    if (!layerRef || !pidRef || !windowIdRef) {
+        CFRelease(windowList);
+        return false; // Cannot access basic window properties
+    }
+
+    // Fourth check: verify the returned window ID matches what we requested
+    CGWindowID returnedId;
+    CFNumberGetValue(windowIdRef, kCFNumberSInt32Type, &returnedId);
+    if (returnedId != windowId) {
+        CFRelease(windowList);
+        return false; // Window ID mismatch
+    }
+
+    // Fifth check: verify window is not a system window or desktop element
+    int layer;
+    CFNumberGetValue(layerRef, kCFNumberIntType, &layer);
+
+    // Filter out system windows (negative layers) and desktop elements
+    if (layer < 0 || layer > 1000) {
+        CFRelease(windowList);
+        return false;
+    }
+
+    // Sixth check: verify we can access the owning process
+    pid_t pid;
+    CFNumberGetValue(pidRef, kCFNumberSInt32Type, &pid);
+
+    if (pid <= 0) {
+        CFRelease(windowList);
+        return false; // Invalid process ID
+    }
+
+    // Seventh check: verify process still exists
+    if (kill(pid, 0) == -1 && errno == ESRCH) {
+        CFRelease(windowList);
+        return false; // Process no longer exists
+    }
+
+    // Eighth check: verify window has valid bounds (not completely off-screen or invalid)
+    CFDictionaryRef boundsRef = static_cast<CFDictionaryRef>(CFDictionaryGetValue(windowInfo, kCGWindowBounds));
+    if (boundsRef) {
+        CGRect bounds;
+        if (CGRectMakeWithDictionaryRepresentation(boundsRef, &bounds)) {
+            // Check for reasonable window dimensions
+            if (bounds.size.width <= 0 || bounds.size.height <= 0 ||
+                bounds.size.width > 10000 || bounds.size.height > 10000) {
+                CFRelease(windowList);
+                return false; // Invalid window dimensions
+            }
+
+            // Check for reasonable position (not massively off-screen)
+            if (bounds.origin.x < -5000 || bounds.origin.x > 5000 ||
+                bounds.origin.y < -5000 || bounds.origin.y > 5000) {
+                CFRelease(windowList);
+                return false; // Window too far off-screen
+            }
+        } else {
+            CFRelease(windowList);
+            return false; // Cannot parse window bounds
+        }
+    } else {
+        CFRelease(windowList);
+        return false; // No bounds information available
+    }
+
+    // Ninth check: verify window name/title can be accessed (indicates not restricted)
+    CFStringRef nameRef = static_cast<CFStringRef>(CFDictionaryGetValue(windowInfo, kCGWindowName));
+    // Allow windows with empty names, but verify the property can be accessed
+
+    // Tenth check: verify window owner name can be accessed
+    CFStringRef ownerRef = static_cast<CFStringRef>(CFDictionaryGetValue(windowInfo, kCGWindowOwnerName));
+    if (!ownerRef) {
+        CFRelease(windowList);
+        return false; // Cannot access window owner name
+    }
+
+    CFRelease(windowList);
+    return true;
 }
 
 std::chrono::milliseconds CocoaEnumerator::getLastEnumerationTime() const {
@@ -651,6 +780,50 @@ std::optional<WindowInfo> CocoaEnumerator::getFocusedWindowViaAccessibility() {
 
     // For now, return nullopt - full AX integration would require more complex code
     return std::nullopt;
+}
+
+// NEW: Workspace switching operations (for cross-workspace focus)
+bool CocoaEnumerator::switchToWorkspace(const std::string& workspaceId) {
+    // Implementation for User Story 2 - macOS workspace switching
+
+    // Convert workspace ID to integer
+    int workspaceIndex;
+    try {
+        workspaceIndex = std::stoi(workspaceId);
+    } catch (const std::exception&) {
+        return false; // Invalid workspace ID format
+    }
+
+    // For now, we'll use a simplified approach
+    // In a full implementation, this would use private CGS framework calls
+    // to switch between Mission Control spaces
+
+    // Check if the workspace index is reasonable (0-15 spaces is typical)
+    if (workspaceIndex < 0 || workspaceIndex > 15) {
+        return false;
+    }
+
+    // This is a placeholder implementation
+    // Real implementation would require:
+    // 1. CGSSetWorkspace() or similar private API calls
+    // 2. Handling of Mission Control/Spaces transitions
+    // 3. Proper error handling for workspace switching failures
+
+    // For User Story 2, we'll return false to indicate switching is attempted
+    // but not fully implemented due to private API requirements
+    return false;
+}
+
+bool CocoaEnumerator::canSwitchWorkspaces() const {
+    // Check if workspace switching is potentially available
+    // This would require checking macOS version (10.7+) and Mission Control settings
+
+    // For now, we'll return false since the full implementation requires private APIs
+    // In a production implementation, this would check:
+    // 1. macOS version compatibility
+    // 2. Mission Control enabled status
+    // 3. Accessibility permissions
+    return false;
 }
 
 } // namespace WindowManager
