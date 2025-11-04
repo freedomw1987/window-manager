@@ -25,12 +25,14 @@ if(WIN32)
     add_definitions(-DWINDOWS_PLATFORM)
     set(PLATFORM_SOURCES
         src/platform/windows/win32_enumerator.cpp
+        src/platform/windows/win32_element_enumerator.cpp
     )
     set(PLATFORM_LIBS user32 kernel32 psapi shell32 ole32 oleaut32)
 elseif(APPLE)
     add_definitions(-DMACOS_PLATFORM)
     set(PLATFORM_SOURCES
         src/platform/macos/cocoa_enumerator.cpp
+        src/platform/macos/cocoa_element_enumerator.cpp
     )
     find_library(COREGRAPHICS_LIBRARY CoreGraphics)
     find_library(FOUNDATION_LIBRARY Foundation)
@@ -42,6 +44,7 @@ elseif(UNIX)
     add_definitions(-DLINUX_PLATFORM)
     set(PLATFORM_SOURCES
         src/platform/linux/x11_enumerator.cpp
+        src/platform/linux/x11_element_enumerator.cpp
     )
     find_package(X11 REQUIRED)
     set(PLATFORM_LIBS ${X11_LIBRARIES} ${X11_Xext_LIB})
@@ -57,6 +60,13 @@ set(CORE_SOURCES
     src/core/exceptions.cpp
     src/core/focus_operation.cpp
     src/core/focus_request.cpp
+    # Element enumeration files (User Story 1)
+    src/core/ui_element.cpp
+    src/core/element_types.cpp
+    src/core/element_result.cpp
+    src/core/element_query.cpp
+    src/core/element_enumerator.cpp
+    src/ui/element_cli.cpp
     src/ui/cli.cpp
     src/ui/interactive.cpp
     src/filters/search_query.cpp
@@ -109,6 +119,13 @@ if(BUILD_TESTING)
         src/core/exceptions.cpp
         src/core/focus_operation.cpp
         src/core/focus_request.cpp
+        # Element enumeration files (User Story 1)
+        src/core/ui_element.cpp
+        src/core/element_types.cpp
+        src/core/element_result.cpp
+        src/core/element_query.cpp
+        src/core/element_enumerator.cpp
+        src/ui/element_cli.cpp
         src/ui/cli.cpp
         src/ui/interactive.cpp
         src/filters/search_query.cpp

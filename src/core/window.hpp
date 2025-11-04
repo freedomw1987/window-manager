@@ -54,6 +54,15 @@ struct WindowInfo {
     bool requiresRestore;                 // Whether window needs restoration before focus
     bool workspaceSwitchRequired;         // Whether focusing requires workspace change
 
+    // NEW: Element enumeration support
+    bool supportsElementEnumeration;     // Platform capability
+    size_t estimatedElementCount;        // Performance hint
+    std::chrono::steady_clock::time_point lastElementEnumeration;
+
+    // NEW: Element enumeration metadata
+    bool hasElementCache;                // Whether elements are cached
+    std::chrono::milliseconds lastElementEnumerationTime;
+
     // Default constructor
     WindowInfo();
 
@@ -88,6 +97,10 @@ struct WindowInfo {
     bool canBeFocused() const;            // NEW: Whether window is focusable
     bool needsWorkspaceSwitch() const;    // NEW: Whether workspace switching is required
     bool needsRestoration() const;        // NEW: Whether window needs restoration before focus
+
+    // NEW: Element enumeration methods
+    bool canEnumerateElements() const;
+    bool hasRecentElementCache(std::chrono::milliseconds maxAge = std::chrono::seconds(30)) const;
 
     // Display and formatting methods
     std::string toString() const;         // Enhanced with workspace info

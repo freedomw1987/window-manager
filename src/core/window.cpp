@@ -22,6 +22,10 @@ WindowInfo::WindowInfo()
     , state(WindowState::Normal)
     , isFocused(false)
     , isMinimized(false)
+    , supportsElementEnumeration(false)
+    , estimatedElementCount(0)
+    , hasElementCache(false)
+    , lastElementEnumerationTime(std::chrono::milliseconds(0))
 {
 }
 
@@ -44,6 +48,10 @@ WindowInfo::WindowInfo(const std::string& handle, const std::string& title,
     , state(WindowState::Normal)
     , isFocused(false)
     , isMinimized(false)
+    , supportsElementEnumeration(false)
+    , estimatedElementCount(0)
+    , hasElementCache(false)
+    , lastElementEnumerationTime(std::chrono::milliseconds(0))
 {
 }
 
@@ -68,6 +76,10 @@ WindowInfo::WindowInfo(const std::string& handle, const std::string& title,
     , state(state)
     , isFocused(state == WindowState::Focused)
     , isMinimized(state == WindowState::Minimized)
+    , supportsElementEnumeration(false)
+    , estimatedElementCount(0)
+    , hasElementCache(false)
+    , lastElementEnumerationTime(std::chrono::milliseconds(0))
 {
 }
 
@@ -326,6 +338,21 @@ bool WindowInfo::operator<(const WindowInfo& other) const {
         return x < other.x;
     }
     return y < other.y;
+}
+
+// NEW: Element enumeration methods
+bool WindowInfo::canEnumerateElements() const {
+    return supportsElementEnumeration;
+}
+
+bool WindowInfo::hasRecentElementCache(std::chrono::milliseconds maxAge) const {
+    if (!hasElementCache) {
+        return false;
+    }
+
+    auto now = std::chrono::steady_clock::now();
+    auto age = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastElementEnumeration);
+    return age <= maxAge;
 }
 
 } // namespace WindowManager

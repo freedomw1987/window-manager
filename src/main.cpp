@@ -13,10 +13,12 @@
 #include "filters/search_query.hpp"
 #include "filters/filter_result.hpp"
 #include "platform_config.h"
+#include "core/element_enumerator.hpp"
+#include "ui/element_cli.hpp"
 
 // Function declarations for different modes
-int listWindows(bool verbose = false, const std::string& format = "text", bool showHandles = false, bool handlesOnly = false);
-int searchWindows(const std::string& keyword, bool caseSensitive = false, bool verbose = false, const std::string& format = "text");
+int listWindows(bool verbose = false, const std::string& format = "text", bool showHandles = false, bool handlesOnly = false, const std::string& windowHandle = "");
+int searchWindows(const std::string& keyword, bool caseSensitive = false, bool verbose = false, const std::string& format = "text", const std::string& windowHandle = "");
 int focusWindow(const std::string& handle, bool verbose = false, const std::string& format = "text",
                 bool allowWorkspaceSwitch = true, int timeout = 5);
 int validateHandle(const std::string& handle, bool verbose = false, const std::string& format = "text");
@@ -58,6 +60,7 @@ int main(int argc, char* argv[]) {
         bool verbose = false;
         bool caseSensitive = false;
         std::string format = "text";
+        std::string windowHandle; // NEW: Window handle for element operations
 
         for (size_t i = 2; i < args.size(); ++i) {
             if (args[i] == "--verbose") {
@@ -73,6 +76,13 @@ int main(int argc, char* argv[]) {
                     }
                 } else {
                     std::cerr << "Error: --format requires an argument (text|json)\n";
+                    return 1;
+                }
+            } else if (args[i] == "--window") {
+                if (i + 1 < args.size()) {
+                    windowHandle = args[++i];
+                } else {
+                    std::cerr << "Error: --window requires a window handle argument\n";
                     return 1;
                 }
             }
@@ -93,7 +103,7 @@ int main(int argc, char* argv[]) {
                 // Other options like --verbose and --format are already parsed above
             }
 
-            return listWindows(verbose, format, showHandles, handlesOnly);
+            return listWindows(verbose, format, showHandles, handlesOnly, windowHandle);
         } else if (command == "search") {
             if (args.size() < 3) {
                 std::cerr << "Error: search command requires a keyword\n";
@@ -101,7 +111,7 @@ int main(int argc, char* argv[]) {
                 return 1;
             }
             std::string keyword = args[2];
-            return searchWindows(keyword, caseSensitive, verbose, format);
+            return searchWindows(keyword, caseSensitive, verbose, format, windowHandle);
         } else if (command == "focus") {
             if (args.size() < 3) {
                 std::cerr << "Error: focus command requires a window handle\n";
@@ -174,7 +184,7 @@ int main(int argc, char* argv[]) {
     }
 }
 
-int listWindows(bool verbose, const std::string& format, bool showHandles, bool handlesOnly) {
+int listWindows(bool verbose, const std::string& format, bool showHandles, bool handlesOnly, const std::string& windowHandle) {
     try {
         // Create window manager
         auto windowManager = WindowManager::WindowManager::create();
@@ -184,7 +194,111 @@ int listWindows(bool verbose, const std::string& format, bool showHandles, bool 
         cli.setOutputFormat(format);
         cli.setVerbose(verbose);
 
-        // Get all windows
+        // Check if element enumeration for specific window is requested
+        if (!windowHandle.empty()) {
+            // Element enumeration mode - enumerate elements within specific window
+
+            // Validate the window handle first
+            if (!windowManager->validateHandle(windowHandle)) {
+                cli.displayError("Invalid window handle: " + windowHandle);
+                cli.displayError("Use 'window-manager list --show-handles' to see available windows");
+                return 1;
+            }
+
+            // Create element enumerator
+            auto elementEnumerator = WindowManager::ElementEnumerator::create();
+            if (!elementEnumerator) {
+                cli.displayError("Element enumeration is not supported on this platform");
+                cli.displayError("Platform: " + windowManager->getSystemInfo());
+                return 2;
+            }
+
+            // Check if platform has required permissions
+            if (!elementEnumerator->hasElementAccessPermissions()) {
+                WindowManager::ElementCLI elementCli;
+                elementCli.setOutputFormat(format);
+                elementCli.displayPermissionWarning(windowManager->getSystemInfo());
+                cli.displayError("Element enumeration requires accessibility permissions");
+                return 3;
+            }
+
+            // Check if the specific window supports element enumeration
+            if (!elementEnumerator->supportsElementEnumeration(windowHandle)) {
+                WindowManager::ElementCLI elementCli;
+                elementCli.setOutputFormat(format);
+                elementCli.displayElementEnumerationError(windowHandle,
+                    "Window does not support element enumeration",
+                    "This window may not expose its UI elements for accessibility");
+                return 4;
+            }
+
+            try {
+                // Measure element enumeration time
+                auto start = std::chrono::steady_clock::now();
+                auto elementResult = elementEnumerator->enumerateElements(windowHandle);
+                auto end = std::chrono::steady_clock::now();
+                auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+
+                // Create element CLI for display
+                WindowManager::ElementCLI elementCli;
+                elementCli.setOutputFormat(format);
+                elementCli.setVerbose(verbose);
+
+                // Display elements based on options
+                if (handlesOnly) {
+                    elementCli.displayElementsCompact(elementResult, true);
+                } else if (showHandles) {
+                    elementCli.displayElementsCompact(elementResult, false);
+                } else {
+                    elementCli.displayElements(elementResult);
+                }
+
+                // Show performance stats if verbose
+                if (verbose) {
+                    elementCli.displayElementPerformanceStats(duration, elementResult.totalElementCount, windowHandle);
+                    cli.displayInfo("Platform: " + windowManager->getSystemInfo());
+
+                    // Additional performance reporting
+                    if (elementResult.totalElementCount > 0) {
+                        double elementsPerSecond = (double)elementResult.totalElementCount / ((double)duration.count() / 1000.0);
+                        cli.displayInfo("Elements per second: " + std::to_string(elementsPerSecond));
+                    }
+
+                    // Check platform-specific performance capabilities
+                    std::string platformInfo = elementEnumerator->getPlatformInfo();
+                    cli.displayInfo("Element enumerator: " + platformInfo);
+
+                    // Memory efficiency indication
+                    size_t estimatedMemoryUsage = elementResult.totalElementCount * sizeof(WindowManager::UIElement);
+                    cli.displayInfo("Estimated memory usage: " + std::to_string(estimatedMemoryUsage / 1024) + " KB");
+                }
+
+                // Always check performance requirements (even in non-verbose mode)
+                if (duration.count() > 2000) {
+                    cli.displayError("Performance warning: Element enumeration took " +
+                                   std::to_string(duration.count()) + "ms (exceeds 2 second target)");
+                }
+
+                return 0;
+
+            } catch (const WindowManager::WindowManagerException& e) {
+                WindowManager::ElementCLI elementCli;
+                elementCli.setOutputFormat(format);
+                elementCli.displayElementEnumerationError(windowHandle,
+                    std::string("Element enumeration failed: ") + e.what(),
+                    "The window may have been closed or become inaccessible");
+                return 5;
+            } catch (const std::exception& e) {
+                WindowManager::ElementCLI elementCli;
+                elementCli.setOutputFormat(format);
+                elementCli.displayElementEnumerationError(windowHandle,
+                    std::string("Unexpected error: ") + e.what(),
+                    "Please report this error to the developers");
+                return 99;
+            }
+        }
+
+        // Default window enumeration mode
         auto start = std::chrono::steady_clock::now();
         auto windows = windowManager->getAllWindows();
         auto end = std::chrono::steady_clock::now();
@@ -221,7 +335,7 @@ int listWindows(bool verbose, const std::string& format, bool showHandles, bool 
     }
 }
 
-int searchWindows(const std::string& keyword, bool caseSensitive, bool verbose, const std::string& format) {
+int searchWindows(const std::string& keyword, bool caseSensitive, bool verbose, const std::string& format, const std::string& windowHandle) {
     try {
         // Create window manager
         auto windowManager = WindowManager::WindowManager::create();
@@ -231,6 +345,115 @@ int searchWindows(const std::string& keyword, bool caseSensitive, bool verbose, 
         cli.setOutputFormat(format);
         cli.setVerbose(verbose);
 
+        // Check if element search for specific window is requested
+        if (!windowHandle.empty()) {
+            // Element search mode - search elements within specific window
+
+            // Validate the window handle first
+            if (!windowManager->validateHandle(windowHandle)) {
+                cli.displayError("Invalid window handle: " + windowHandle);
+                cli.displayError("Use 'window-manager list --show-handles' to see available windows");
+                return 1;
+            }
+
+            // Create element enumerator
+            auto elementEnumerator = WindowManager::ElementEnumerator::create();
+            if (!elementEnumerator) {
+                cli.displayError("Element search is not supported on this platform");
+                cli.displayError("Platform: " + windowManager->getSystemInfo());
+                return 2;
+            }
+
+            // Check if platform has required permissions
+            if (!elementEnumerator->hasElementAccessPermissions()) {
+                WindowManager::ElementCLI elementCli;
+                elementCli.setOutputFormat(format);
+                elementCli.displayPermissionWarning(windowManager->getSystemInfo());
+                cli.displayError("Element search requires accessibility permissions");
+                return 3;
+            }
+
+            // Check if the specific window supports element enumeration
+            if (!elementEnumerator->supportsElementEnumeration(windowHandle)) {
+                WindowManager::ElementCLI elementCli;
+                elementCli.setOutputFormat(format);
+                elementCli.displayElementEnumerationError(windowHandle,
+                    "Window does not support element search",
+                    "This window may not expose its UI elements for accessibility");
+                return 4;
+            }
+
+            try {
+                // Create element search query
+                WindowManager::ElementSearchQuery elementQuery(keyword, WindowManager::ElementSearchField::All, caseSensitive, false);
+                elementQuery.includeHidden = false;     // Don't include hidden elements by default
+                elementQuery.includeDisabled = true;    // Include disabled elements for better search coverage
+
+                if (verbose) {
+                    std::cerr << "Debug: Starting element search for '" << keyword << "' in window " << windowHandle << std::endl;
+                    std::cerr << "Debug: Case sensitive: " << (caseSensitive ? "yes" : "no") << std::endl;
+                }
+
+                // Measure element search time
+                auto start = std::chrono::steady_clock::now();
+                auto elementResult = elementEnumerator->searchElements(windowHandle, elementQuery);
+                auto end = std::chrono::steady_clock::now();
+                auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+
+                // Create element CLI for display
+                WindowManager::ElementCLI elementCli;
+                elementCli.setOutputFormat(format);
+                elementCli.setVerbose(verbose);
+
+                // Display element search results
+                elementCli.displayElementSearchResults(elementResult, keyword);
+
+                // Show performance stats if verbose
+                if (verbose) {
+                    elementCli.displayElementPerformanceStats(duration, elementResult.totalElementCount, windowHandle);
+                    cli.displayInfo("Platform: " + windowManager->getSystemInfo());
+
+                    // Additional performance reporting
+                    if (elementResult.totalElementCount > 0) {
+                        double elementsPerSecond = (double)elementResult.totalElementCount / ((double)duration.count() / 1000.0);
+                        cli.displayInfo("Elements per second: " + std::to_string(elementsPerSecond));
+                    }
+
+                    // Check platform-specific performance capabilities
+                    std::string platformInfo = elementEnumerator->getPlatformInfo();
+                    cli.displayInfo("Element enumerator: " + platformInfo);
+
+                    // Memory efficiency indication
+                    size_t estimatedMemoryUsage = elementResult.totalElementCount * sizeof(WindowManager::UIElement);
+                    cli.displayInfo("Estimated memory usage: " + std::to_string(estimatedMemoryUsage / 1024) + " KB");
+                }
+
+                // Always check performance requirements (even in non-verbose mode)
+                if (duration.count() > 2000) {
+                    cli.displayError("Performance warning: Element search took " +
+                                   std::to_string(duration.count()) + "ms (exceeds 2 second target)");
+                }
+
+                return 0;
+
+            } catch (const WindowManager::WindowManagerException& e) {
+                WindowManager::ElementCLI elementCli;
+                elementCli.setOutputFormat(format);
+                elementCli.displayElementEnumerationError(windowHandle,
+                    std::string("Element search failed: ") + e.what(),
+                    "The window may have been closed or become inaccessible");
+                return 5;
+            } catch (const std::exception& e) {
+                WindowManager::ElementCLI elementCli;
+                elementCli.setOutputFormat(format);
+                elementCli.displayElementEnumerationError(windowHandle,
+                    std::string("Unexpected error: ") + e.what(),
+                    "Please report this error to the developers");
+                return 99;
+            }
+        }
+
+        // Default window search mode
         // Create search query
         WindowManager::SearchQuery query(keyword, WindowManager::SearchField::Both, caseSensitive, false);
 
@@ -481,8 +704,8 @@ void printUsage(const char* programName) {
     std::cout << "Window List and Filter Program\n";
     std::cout << "Usage: " << programName << " [options] <command> [args...]\n\n";
     std::cout << "Commands:\n";
-    std::cout << "  list                    List all windows\n";
-    std::cout << "  search <keyword>        Search windows by keyword\n";
+    std::cout << "  list                    List all windows or elements in a specific window\n";
+    std::cout << "  search <keyword>        Search windows by keyword or elements in a specific window\n";
     std::cout << "  focus <handle>          Focus window by handle (with workspace switching)\n";
     std::cout << "  validate-handle <handle> Validate window handle format and existence\n";
     std::cout << "  interactive             Start interactive filtering mode\n\n";
@@ -496,14 +719,20 @@ void printUsage(const char* programName) {
     std::cout << "  --no-workspace-switch   Prevent automatic workspace switching (focus command)\n";
     std::cout << "  --timeout <seconds>     Set operation timeout (focus command)\n";
     std::cout << "  --show-handles          Show window handles in list output\n";
-    std::cout << "  --handles-only          Show only handles and titles (compact format)\n\n";
+    std::cout << "  --handles-only          Show only handles and titles (compact format)\n";
+    std::cout << "  --window <handle>       Enumerate elements within a specific window (list/search commands)\n\n";
     std::cout << "Examples:\n";
     std::cout << "  " << programName << " list\n";
     std::cout << "  " << programName << " list --format json --verbose\n";
     std::cout << "  " << programName << " list --show-handles\n";
     std::cout << "  " << programName << " list --handles-only\n";
+    std::cout << "  " << programName << " list --window 12345\n";
+    std::cout << "  " << programName << " list --window 12345 --verbose\n";
     std::cout << "  " << programName << " search chrome\n";
     std::cout << "  " << programName << " search \"Google Chrome\" --case-sensitive\n";
+    std::cout << "  " << programName << " search button --window 12345\n";
+    std::cout << "  " << programName << " search \"OK\" --window 12345 --case-sensitive\n";
+    std::cout << "  " << programName << " search textfield --window 12345 --verbose\n";
     std::cout << "  " << programName << " focus 12345\n";
     std::cout << "  " << programName << " focus 12345 --verbose\n";
     std::cout << "  " << programName << " focus 12345 --no-workspace-switch\n";
