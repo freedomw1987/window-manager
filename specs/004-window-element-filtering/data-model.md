@@ -6,13 +6,13 @@
 
 ## Overview
 
-This document defines the data structures and relationships required for UI element enumeration within specific windows, extending the existing window management system.
+This document defines the data structures and relationships required for UI element enumeration within specific windows, extending the existing window management system with cross-platform accessibility support.
 
 ## Core Entities
 
 ### UIElement
 
-Represents a single UI element within an application window.
+Represents a single UI element within an application window, discovered through platform-specific accessibility APIs.
 
 ```cpp
 namespace WindowManager {
@@ -50,58 +50,37 @@ enum class ElementState {
 };
 
 struct UIElement {
-    // Identity
-    std::string handle;                 // Platform-specific element identifier
-    std::string parentWindowHandle;     // Reference to containing window
-    std::string parentElementHandle;    // Reference to parent element (for hierarchy)
+    // Identification
+    std::string handle;                    // Platform-specific element identifier
+    std::string parentWindowHandle;        // Window handle this element belongs to
+    ElementType type;                      // Type of UI element
 
-    // Basic Properties
-    ElementType type;
-    std::string name;                   // Element name/title
-    std::string value;                  // Element value/text content
-    std::string description;            // Accessibility description
-    std::string role;                   // Accessibility role
+    // Properties
+    std::string name;                      // Element name/title (from accessibility)
+    std::string description;               // Element description (from accessibility)
+    std::string value;                     // Element value/content (if applicable)
+    std::string className;                 // Platform-specific class name
 
-    // Position and Size (relative to window)
-    int x, y;                          // Position relative to parent window
-    unsigned int width, height;       // Element dimensions
-    bool isVisible;                    // Element visibility state
+    // Geometry
+    int x, y;                             // Position relative to screen
+    int width, height;                    // Element dimensions
+    bool isVisible;                       // Visibility state
 
-    // State Information
-    ElementState state;
-    bool isEnabled;
-    bool isFocusable;
-    bool isClickable;
+    // State
+    ElementState state;                   // Current element state
+    bool isEnabled;                       // Whether element accepts interaction
+    bool isFocusable;                     // Whether element can receive focus
 
-    // Accessibility Properties
-    std::string accessibilityLabel;
-    std::string accessibilityHelp;
-    std::string accessibilityValue;
+    // Hierarchy
+    std::string parentElementHandle;      // Parent element (empty if direct window child)
+    std::vector<std::string> childHandles; // Child element handles
 
-    // Platform-specific metadata (JSON string for flexibility)
-    std::string platformData;
+    // Platform-specific data
+    std::string platformInfo;            // Platform-specific metadata
 
-    // Timestamps
-    std::chrono::steady_clock::time_point discoveredAt;
-
-    // Constructors
-    UIElement();
-    UIElement(const std::string& handle, const std::string& parentWindow,
-              ElementType type, const std::string& name);
-
-    // Validation
-    bool isValid() const;
-    bool hasValidPosition() const;
-    bool hasValidDimensions() const;
-
-    // Output formatting
-    std::string toString() const;
-    std::string toJson() const;
-    std::string toCompactString() const;
-
-    // Comparison operators
-    bool operator==(const UIElement& other) const;
-    bool operator<(const UIElement& other) const;
+    // Discovery metadata
+    std::chrono::steady_clock::time_point discoveredAt; // When element was found
+    std::string enumerationMethod;       // How element was discovered ("AXUIElement", "UIA", "AT-SPI")
 };
 
 } // namespace WindowManager
@@ -109,37 +88,50 @@ struct UIElement {
 
 ### ElementEnumerationResult
 
-Container for element enumeration results with metadata.
+Contains the result of element enumeration operations, including discovered elements and operation metadata.
 
 ```cpp
 namespace WindowManager {
 
 struct ElementEnumerationResult {
+    // Request context
+    std::string windowHandle;             // Target window handle
+    std::string requestId;                // Unique request identifier
+
     // Results
-    std::vector<UIElement> elements;
-    std::string windowHandle;
-    std::string windowTitle;
+    std::vector<UIElement> elements;      // Discovered elements
+    size_t totalElementCount;             // Total number of elements found
+    size_t filteredElementCount;          // Number after filtering (if applicable)
 
-    // Metadata
-    size_t totalElementCount;
-    size_t filteredElementCount;
-    std::chrono::milliseconds enumerationTime;
-    std::chrono::steady_clock::time_point enumeratedAt;
+    // Operation metadata
+    bool success;                         // Whether enumeration succeeded
+    std::string errorMessage;             // Error description (if failed)
+    std::chrono::milliseconds enumerationTime; // Time taken for operation
 
-    // Status information
-    bool success;
-    std::string errorMessage;
-    bool hasAccessibilityPermissions;
-    bool supportsElementEnumeration;
+    // Platform information
+    std::string platformMethod;          // Platform API used ("AXUIElement", "UIA", "AT-SPI")
+    std::string platformVersion;         // Platform API version info
+    bool hasAccessibilityPermissions;    // Whether required permissions are granted
 
-    // Performance metrics
+    // Performance data
     bool meetsPerformanceTarget() const {
-        return enumerationTime <= std::chrono::milliseconds(2000);
+        return enumerationTime.count() <= 2000; // <2 seconds target
     }
 
-    // Output formatting
-    std::string getSummary() const;
-    std::string toJson() const;
+    // Validation
+    bool isValid() const {
+        return success && !windowHandle.empty() && totalElementCount == elements.size();
+    }
+
+    // Factory methods
+    static ElementEnumerationResult createSuccess(const std::string& windowHandle,
+                                                std::vector<UIElement> elements,
+                                                std::chrono::milliseconds duration,
+                                                const std::string& platformMethod);
+
+    static ElementEnumerationResult createError(const std::string& windowHandle,
+                                              const std::string& errorMessage,
+                                              const std::string& platformMethod);
 };
 
 } // namespace WindowManager
@@ -147,72 +139,52 @@ struct ElementEnumerationResult {
 
 ### ElementSearchQuery
 
-Search criteria for filtering elements within windows.
+Defines search criteria for finding specific elements within a window.
 
 ```cpp
 namespace WindowManager {
 
 enum class ElementSearchField {
-    Name,
-    Value,
-    Description,
-    Type,
-    All
+    Name,              // Search in element name/title
+    Description,       // Search in element description
+    Value,            // Search in element value/content
+    ClassName,        // Search in element class name
+    All               // Search in all text fields
 };
 
 struct ElementSearchQuery {
-    std::string searchTerm;
-    ElementSearchField field;
-    bool caseSensitive;
-    bool exactMatch;
-    std::vector<ElementType> typeFilter;  // Filter by element types
+    // Search criteria
+    std::string searchTerm;               // Text to search for
+    ElementSearchField searchField;       // Which field(s) to search
+    bool caseSensitive;                   // Case-sensitive matching
+    bool exactMatch;                      // Exact vs partial matching
+
+    // Filtering options
+    std::vector<ElementType> includeTypes; // Only search these element types (empty = all)
+    std::vector<ElementType> excludeTypes;  // Exclude these element types
     bool includeHidden;                   // Include hidden elements
     bool includeDisabled;                 // Include disabled elements
 
-    // Constructor
+    // Result options
+    size_t maxResults;                    // Maximum number of results (0 = unlimited)
+    bool includeHierarchy;                // Include parent/child relationships in results
+
+    // Constructors
     ElementSearchQuery(const std::string& term,
                       ElementSearchField field = ElementSearchField::All,
                       bool caseSensitive = false,
-                      bool exactMatch = false);
+                      bool exactMatch = false)
+        : searchTerm(term), searchField(field), caseSensitive(caseSensitive),
+          exactMatch(exactMatch), includeHidden(false), includeDisabled(true),
+          maxResults(0), includeHierarchy(false) {}
 
     // Validation
-    bool isValid() const;
+    bool isValid() const {
+        return !searchTerm.empty() && maxResults >= 0;
+    }
 
     // Matching logic
     bool matches(const UIElement& element) const;
-
-    // String representation
-    std::string toString() const;
-};
-
-} // namespace WindowManager
-```
-
-## Extended Entities
-
-### Enhanced WindowInfo
-
-Extension to existing WindowInfo to support element enumeration.
-
-```cpp
-namespace WindowManager {
-
-// Addition to existing WindowInfo struct
-struct WindowInfo {
-    // ... existing fields ...
-
-    // NEW: Element enumeration support
-    bool supportsElementEnumeration;     // Platform capability
-    size_t estimatedElementCount;        // Performance hint
-    std::chrono::steady_clock::time_point lastElementEnumeration;
-
-    // NEW: Element enumeration metadata
-    bool hasElementCache;                // Whether elements are cached
-    std::chrono::milliseconds lastElementEnumerationTime;
-
-    // NEW: Methods for element support
-    bool canEnumerateElements() const;
-    bool hasRecentElementCache(std::chrono::milliseconds maxAge = std::chrono::seconds(30)) const;
 };
 
 } // namespace WindowManager
@@ -220,108 +192,138 @@ struct WindowInfo {
 
 ## Relationships
 
-### Entity Relationships
+### Window-Element Relationship
 
-```text
-WindowInfo (1) ────┐
-                   │
-                   ├─► UIElement (0..*)
-                   │   │
-                   │   └─► UIElement (0..*) [parent-child hierarchy]
-                   │
-                   └─► ElementEnumerationResult (0..*)
-                       │
-                       └─► UIElement (0..*)
+- **One-to-Many**: Each window handle can contain multiple UI elements
+- **Hierarchical**: Elements can have parent-child relationships within the window
+- **Temporal**: Element handles may become invalid when windows close or change
 
-ElementSearchQuery ────┐
-                       │
-                       └─► ElementEnumerationResult (1)
-                           │
-                           └─► UIElement (0..*)
+```cpp
+// Relationship management
+class WindowElementManager {
+public:
+    // Get all elements for a window
+    std::vector<UIElement> getElementsForWindow(const std::string& windowHandle);
+
+    // Get element hierarchy
+    std::vector<UIElement> getElementHierarchy(const std::string& elementHandle);
+
+    // Validate element still exists
+    bool isElementValid(const std::string& elementHandle);
+
+    // Clear elements when window closes
+    void invalidateElementsForWindow(const std::string& windowHandle);
+};
 ```
 
-### Data Flow
+### Element Hierarchy
 
-1. **Element Discovery**:
-   ```
-   WindowHandle → ElementEnumerator → ElementEnumerationResult → UIElement[]
-   ```
+Elements within a window form a tree structure representing the UI hierarchy.
 
-2. **Element Search**:
-   ```
-   WindowHandle + ElementSearchQuery → ElementEnumerator → ElementEnumerationResult → UIElement[]
-   ```
+```cpp
+struct ElementHierarchy {
+    UIElement root;                       // Root element (usually the window itself)
+    std::map<std::string, UIElement> elements; // All elements by handle
+    std::map<std::string, std::vector<std::string>> children; // Parent -> children mapping
 
-3. **Hierarchical Navigation**:
-   ```
-   UIElement → parentElementHandle → UIElement (parent)
-   UIElement → childElements → UIElement[] (children)
-   ```
+    // Navigation helpers
+    std::vector<UIElement> getChildren(const std::string& parentHandle) const;
+    UIElement getParent(const std::string& childHandle) const;
+    std::vector<UIElement> getDescendants(const std::string& ancestorHandle) const;
+    std::vector<UIElement> getSiblings(const std::string& elementHandle) const;
+};
+```
 
 ## Validation Rules
 
 ### UIElement Validation
-- `handle` must be non-empty
-- `parentWindowHandle` must reference valid window
-- `type` must be valid ElementType
-- `x, y` can be negative (elements can be outside visible area)
-- `width, height` must be > 0 for visible elements
-- Platform-specific handle format validation
+
+1. **Handle Uniqueness**: Element handles must be unique within the system
+2. **Window Association**: Every element must have a valid parentWindowHandle
+3. **Geometry Constraints**: Element position and size must be non-negative
+4. **Type Consistency**: Element properties must be consistent with its type
+5. **Hierarchy Integrity**: Parent-child relationships must be bidirectional
 
 ### ElementSearchQuery Validation
-- `searchTerm` must be non-empty for text searches
-- `typeFilter` must contain valid ElementType values
-- Field-specific validation based on `field` selection
+
+1. **Search Term**: Must not be empty for valid queries
+2. **Type Filters**: Include and exclude type lists must not overlap
+3. **Result Limits**: maxResults must be non-negative
+4. **Field Consistency**: Search field must be appropriate for element types
 
 ### ElementEnumerationResult Validation
-- `windowHandle` must reference valid window
-- `totalElementCount >= filteredElementCount`
-- `enumerationTime` must be positive
-- `success == true` implies `elements` contains valid data
+
+1. **Consistency**: totalElementCount must match elements.size()
+2. **Window Reference**: windowHandle must not be empty for valid results
+3. **Error State**: If success is false, errorMessage must not be empty
+4. **Performance**: Operation should complete within reasonable time bounds
 
 ## State Transitions
 
 ### Element Discovery Lifecycle
-```text
-Unknown → Discovered → Cached → Stale → Rediscovered
-    ↓         ↓          ↓        ↓         ↓
-   N/A    Enumerated  Available  Expired  Updated
+
+```cpp
+enum class ElementDiscoveryState {
+    NotDiscovered,    // Element not yet found
+    Discovering,      // Enumeration in progress
+    Discovered,       // Element found and valid
+    Stale,           // Element data may be outdated
+    Invalid          // Element no longer exists
+};
 ```
 
-### Element State Changes
-```text
-Normal ⟷ Focused ⟷ Selected
-  ↓         ↓         ↓
-Disabled  Hidden   Checked/Unchecked
+### Window-Element State Synchronization
+
+1. **Window Active** → Elements can be enumerated
+2. **Window Minimized** → Elements may have limited accessibility
+3. **Window Closed** → All associated elements become invalid
+4. **Window Focus Changed** → Element states may need refresh
+
+## Cache Management
+
+### Element Cache Strategy
+
+```cpp
+struct ElementCache {
+    std::map<std::string, ElementEnumerationResult> windowCache; // Window -> elements
+    std::map<std::string, std::chrono::steady_clock::time_point> cacheTimestamps; // Last update
+    static constexpr std::chrono::milliseconds CACHE_TTL{30000}; // 30 second TTL
+
+    // Cache operations
+    void store(const std::string& windowHandle, const ElementEnumerationResult& result);
+    std::optional<ElementEnumerationResult> retrieve(const std::string& windowHandle);
+    void invalidate(const std::string& windowHandle);
+    void cleanup(); // Remove expired entries
+};
 ```
 
-## Performance Considerations
+## Platform Abstraction
 
-### Caching Strategy
-- Cache elements per window handle with 30-second TTL
-- Invalidate cache on window state changes
-- Progressive loading for large element trees
-- Memory limits: max 1000 elements per window
+### Cross-Platform Element Mapping
 
-### Optimization Targets
-- Element enumeration: < 2 seconds for 100 elements
-- Search operations: < 500ms for cached results
-- Memory usage: < 50MB for element cache
-- Cache hit ratio: > 80% for repeated operations
+Different platforms expose element information differently. The data model abstracts these differences:
 
-## Platform-Specific Considerations
+```cpp
+// Platform-specific element adapters
+class PlatformElementAdapter {
+public:
+    virtual UIElement convertToUIElement(const PlatformSpecificElement& platformElement) = 0;
+    virtual ElementType mapElementType(const PlatformSpecificType& platformType) = 0;
+    virtual ElementState mapElementState(const PlatformSpecificState& platformState) = 0;
+};
 
-### Windows (Win32)
-- Handle format: IUIAutomationElement pointer as string
-- Maximum element depth: 20 levels
-- Performance: UIA tree traversal can be slow for deep hierarchies
+// Platform implementations
+class MacOSElementAdapter : public PlatformElementAdapter {
+    // Convert AXUIElement to UIElement
+};
 
-### macOS (Accessibility)
-- Handle format: AXUIElementRef as CFTypeID string
-- Requires accessibility permissions
-- Performance: Generally fast but permission-dependent
+class WindowsElementAdapter : public PlatformElementAdapter {
+    // Convert IUIAutomationElement to UIElement
+};
 
-### Linux (X11/AT-SPI)
-- Handle format: AT-SPI object path
-- Variable support depending on application
-- Fallback to basic window property inspection
+class LinuxElementAdapter : public PlatformElementAdapter {
+    // Convert AtspiAccessible to UIElement
+};
+```
+
+This data model provides a robust foundation for cross-platform UI element enumeration while maintaining type safety, performance, and extensibility for future platform additions.
